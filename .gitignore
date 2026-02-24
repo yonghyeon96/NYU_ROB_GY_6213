@@ -4,3 +4,5 @@ __pycache__/
 base_code_lab_02/robot_python_code/data_*/
 base_code_lab_02/robot_python_code/*graph*/
 base_code_lab_02/robot_python_code/wasted data/
+__pycache__/
+*.pyc
