@@ -141,7 +141,7 @@ def sample_model(num_samples):
 ######### MAIN ########
 
 # Some sample data to test with
-files_and_data = [
+"""files_and_data = [
     ['robot_data_60_0_28_01_26_13_41_44.pkl', 67/100], # filename, measured distance in meters
     ['robot_data_60_0_28_01_26_13_43_41.pkl', 68/100],
     ['robot_data_60_0_28_01_26_13_37_15.pkl', 113/100],
@@ -154,20 +154,41 @@ files_and_data = [
     ['robot_data_60_0_28_01_26_13_33_20.pkl', 100/100],
     ['robot_data_60_0_28_01_26_13_34_28.pkl', 103/100],
     ]
+"""
 
+"""files_and_data = [
+    ['robot_data_34_0_10_02_26_19_21_42.pkl', 0.295],  # sqrt(0^2 + 0.295^2)
+    ['robot_data_0_0_10_02_26_19_24_15.pkl', 0.294],
+    ['robot_data_0_0_10_02_26_19_25_18.pkl', 0.305],
+    ['robot_data_0_0_10_02_26_19_28_13.pkl', 0.846],
+    ['robot_data_0_0_10_02_26_19_29_28.pkl', 0.821],
+    ['robot_data_0_0_10_02_26_19_31_42.pkl', 0.861],
+    ['robot_data_0_0_10_02_26_19_33_02.pkl', 1.270],
+    ['robot_data_0_0_10_02_26_19_36_45.pkl', 1.323],
+    ['robot_data_0_0_10_02_26_19_38_19.pkl', 1.413],
+    ['robot_data_0_0_10_02_26_19_39_50.pkl', 1.841],
+    ['robot_data_0_0_10_02_26_19_42_09.pkl', 1.827],
+    ['robot_data_0_0_10_02_26_19_43_27.pkl', 1.818],
+]
+"""
+"""
+files_and_data = [
+
+]
+"""
 # Plot the motion model predictions for a single trial
 if False:
-    filename = './data_straight/robot_data_60_0_28_01_26_13_36_10.pkl'
+    filename = './data_mat_straight/robot_data_0_0_10_02_26_19_24_15.pkl'
     run_my_model_on_trial(filename)
 
 # Plot the motion model predictions for each trial in a folder
 if False:
-    directory = ('./data_straight/')
+    directory = ('./data_mat_straight/')
     plot_many_trial_predictions(directory)
 
 # A list of files to open, process, and plot - for comparing predicted with actual distances
 if False:
-    directory = ('./data_straight/')    
+    directory = ('./data_mat_straight/')    
     process_files_and_plot(files_and_data, directory)
 
 # Try to sample with the motion model

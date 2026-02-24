@@ -8,28 +8,39 @@ import random
 # A function for obtaining variance in distance travelled as a function of distance travelled
 def variance_distance_travelled_s(distance):
     # Add student code here
-    var_s = 1
+    # Variance model: sigma_s^2 = alpha * s
+    alpha = 1.79e-4
+    var_s = alpha * distance
 
     return var_s
 
 # Function to calculate distance from encoder counts
 def distance_travelled_s(encoder_counts):
     # Add student code here
-    s = 0
+    s = 3.05e-4  #Linear model, y = ax
 
-    return s
+    return s*encoder_counts
 
 # A function for obtaining variance in distance travelled as a function of distance travelled
-def variance_rotational_velocity_w(distance):
+def variance_rotational_velocity_w(alpha):
     # Add student code here
-    var_w = 1
+    v = 3.35e-3
+    return v
 
-    return var_w
 
 def rotational_velocity_w(steering_angle_command):
     # Add student code here
-    w = 0
+ 
+    k = 1.4357e-02
     
+#   Asymmetric fit
+#    if steering_angle_command >= 0:
+#        k = 1.0611e-02
+#    else:
+#        k = 1.7143e-02
+        
+    w = k * steering_angle_command
+
     return w
 
 # This class is an example structure for implementing your motion model.

@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.pyc
+base_code_lab_02/robot_python_code/data_*/
+base_code_lab_02/robot_python_code/*graph*/
+base_code_lab_02/robot_python_code/wasted data/
