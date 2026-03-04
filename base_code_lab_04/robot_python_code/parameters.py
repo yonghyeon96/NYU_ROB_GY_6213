@@ -36,6 +36,11 @@ covariance_plot_scale = 100
 
 # PF parameters, modify the map and num particles as you see fit.
 num_particles = 100
+distance_variance = 0.10  # m^2, lidar likelihood variance
+encoder_counts_to_distance = 3.05e-4  # m / encoder_count
+steering_to_w = 1.4357e-2  # rad/s per steering command unit
+distance_variance_gain = 1.79e-4  # motion model variance gain for traveled distance
+rotational_velocity_variance = 3.35e-3  # (rad/s)^2
 wall_corner_list = [
     [0, 0, 2.74, 0], 
     [0, 0, 0, 3.78], 

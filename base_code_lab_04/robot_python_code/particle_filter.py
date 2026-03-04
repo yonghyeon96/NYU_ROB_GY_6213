@@ -100,12 +100,32 @@ class Map:
     # Function to get distance to a wall from a state, in the direction of the state's theta angle.
     # Or return the distance currently believed to be the closest if its closer.
     def get_distance_to_wall(self, state, wall, closest_distance):
-        ################## Add student code here ###################
-        # Use geometry to calculate the distance from the robot to the wall, for a particular direction state.theta
-        # If the direction isn't pointed towards the wall, return closest_distance.
-        # Suggestion: Thoroughly test your code with unit tests before using
-        
-        return 0
+        # Ray/segment intersection.
+        x0 = state.x
+        y0 = state.y
+        ray_dx = math.cos(state.theta)
+        ray_dy = math.sin(state.theta)
+
+        x1 = wall.corner1.x
+        y1 = wall.corner1.y
+        x2 = wall.corner2.x
+        y2 = wall.corner2.y
+        seg_dx = x2 - x1
+        seg_dy = y2 - y1
+
+        den = ray_dx * seg_dy - ray_dy * seg_dx
+        if abs(den) < 1e-10:
+            return closest_distance  # Parallel or collinear.
+
+        px = x1 - x0
+        py = y1 - y0
+
+        t = (px * seg_dy - py * seg_dx) / den  # Distance along ray (ray direction is unit length).
+        u = (px * ray_dy - py * ray_dx) / den  # Position on segment [0, 1].
+
+        if t >= 0 and 0 <= u <= 1:
+            return min(closest_distance, t)
+        return closest_distance
 
 
 # Class to hold a particle
@@ -117,28 +137,63 @@ class Particle:
         
     # Function to create a new random particle state within a range
     def randomize_uniformly(self, xy_range):
-        ################## Add student code here ###################
-        self.state = State(0, 0, 0)
+        x = random.uniform(xy_range[0], xy_range[1])
+        y = random.uniform(xy_range[2], xy_range[3])
+        theta = random.uniform(-math.pi, math.pi)
+        self.state = State(x, y, theta)
         self.weight = 1
 
     # Function to create a new random particle state with a normal distribution
     def randomize_around_initial_state(self, initial_state, state_stdev):
-        ################## Add student code here ###################
-        self.state = State(0, 0, 0)
+        x = random.gauss(initial_state.x, state_stdev.x)
+        y = random.gauss(initial_state.y, state_stdev.y)
+        theta = angle_wrap(random.gauss(initial_state.theta, state_stdev.theta))
+        self.state = State(x, y, theta)
         self.weight = 1
         
     # Function to take a particle and "randomly" propagate it forward according to a motion model.
     def propagate_state(self, last_state, delta_encoder_counts, steering, delta_t):
-        ################## Add student code here ###################
-        x = 0
-        y = 0
-        theta = 0
+        s_mean = parameters.encoder_counts_to_distance * delta_encoder_counts
+        w_mean = parameters.steering_to_w * steering
+
+        s_var = parameters.distance_variance_gain * abs(s_mean)
+        s_std = math.sqrt(max(0, s_var))
+        w_std = math.sqrt(max(0, parameters.rotational_velocity_variance))
+
+        s_sample = s_mean + random.gauss(0, s_std)
+        w_sample = w_mean + random.gauss(0, w_std)
+
+        x = last_state.x + s_sample * math.cos(last_state.theta)
+        y = last_state.y + s_sample * math.sin(last_state.theta)
+        theta = angle_wrap(last_state.theta + w_sample * delta_t)
         self.state = State(x, y, theta)
         
     # Function to determine a particles weight based how well the lidar measurement matches up with the map.
     def calculate_weight(self, lidar_signal, map):
-        ################## Add student code here ###################
-        self.weight = 0
+        valid_ray_count = 0
+        log_weight_sum = 0
+        min_prob = 1e-12
+
+        for i in range(len(lidar_signal.angles)):
+            measured_distance = lidar_signal.convert_hardware_distance(lidar_signal.distances[i])
+            if measured_distance <= 0:
+                continue
+
+            beam_angle = self.state.theta + lidar_signal.convert_hardware_angle(lidar_signal.angles[i])
+            beam_state = State(self.state.x, self.state.y, angle_wrap(beam_angle))
+            expected_distance = map.closest_distance_to_walls(beam_state)
+            if expected_distance > 1e6:
+                continue
+
+            prob = max(min_prob, self.gaussian(expected_distance, measured_distance))
+            log_weight_sum += math.log(prob)
+            valid_ray_count += 1
+
+        if valid_ray_count == 0:
+            self.weight = min_prob
+        else:
+            # Use geometric mean to avoid numerical underflow while preserving ranking.
+            self.weight = max(min_prob, math.exp(log_weight_sum / valid_ray_count))
         
     # Return the normal distribution function output.
     def gaussian(self, expected_distance, distance):
@@ -183,16 +238,60 @@ class ParticleSet:
 
     # Function to resample the particles set, i.e. make a new one with more copies of particles with higher weights.  
     def resample(self, max_weight):
-        ################## Add student code here ###################
-        self.particle_list = self.particle_list
+        if self.num_particles == 0:
+            return
+
+        if max_weight <= 0:
+            for p in self.particle_list:
+                p.weight = 1
+            return
+
+        resampled_particles = []
+        index = random.randint(0, self.num_particles - 1)
+        beta = 0
+        for _ in range(self.num_particles):
+            beta += random.uniform(0, 2 * max_weight)
+            while beta > self.particle_list[index].weight:
+                beta -= self.particle_list[index].weight
+                index = (index + 1) % self.num_particles
+            sampled_particle = self.particle_list[index].deepcopy()
+            sampled_particle.weight = 1
+            resampled_particles.append(sampled_particle)
+
+        self.particle_list = resampled_particles
             
     # Calculate the mean state. 
     def update_mean_state(self):
-        ################## Add student code here ###################
-        ## Be careful how you calculate the mean theta
-        self.mean_state.x = 0
-        self.mean_state.y = 0
-        self.mean_state.theta = 0
+        if len(self.particle_list) == 0:
+            self.mean_state = State(0, 0, 0)
+            return
+
+        total_weight = 0
+        for particle in self.particle_list:
+            total_weight += max(0, particle.weight)
+
+        if total_weight <= 0:
+            total_weight = len(self.particle_list)
+            weights = [1.0] * len(self.particle_list)
+        else:
+            weights = [max(0, p.weight) for p in self.particle_list]
+
+        mean_x = 0
+        mean_y = 0
+        mean_cos_theta = 0
+        mean_sin_theta = 0
+        for i, particle in enumerate(self.particle_list):
+            w = weights[i] / total_weight
+            mean_x += w * particle.state.x
+            mean_y += w * particle.state.y
+            mean_cos_theta += w * math.cos(particle.state.theta)
+            mean_sin_theta += w * math.sin(particle.state.theta)
+
+        mean_theta = math.atan2(mean_sin_theta, mean_cos_theta)
+
+        self.mean_state.x = mean_x
+        self.mean_state.y = mean_y
+        self.mean_state.theta = mean_theta
         
     # Print the particle set. Useful for debugging.
     def print_particles(self):
@@ -218,22 +317,30 @@ class ParticleFilter:
         if len(measurement_signal.angles)>0:
             self.correction(measurement_signal)
         self.particle_set.update_mean_state()
+        self.state_estimate = self.particle_set.mean_state
         self.state_estimate_list.append(self.state_estimate.deepcopy())
 
     # Predict the current state from the last state.
     def prediction(self, odometry_signal, delta_t):
-        ################## Add student code here ###################
-        # Calculate the change in encoder counts from the last time step. Leverage self.last_encoder counts
-        # odometry_signal has two elements, encoder_counts and steering angle
-        # Next use a motion model to randomly propagate all particles from a deep copy of their current state. 
-        # Be sure to use the Particle class propagate state function.
+        encoder_counts = odometry_signal[0]
+        steering = odometry_signal[1]
+
+        delta_encoder_counts = encoder_counts - self.last_encoder_counts
+        self.last_encoder_counts = encoder_counts
+
+        for particle in self.particle_set.particle_list:
+            last_state = particle.state.deepcopy()
+            particle.propagate_state(last_state, delta_encoder_counts, steering, delta_t)
         return
         
     # Corrrect the predicted states.
     def correction(self, measurement_signal):
-        ################## Add student code here ###################
-        # Determine the max weight and use it to resample the particle set.
         max_weight = 0
+        for particle in self.particle_set.particle_list:
+            particle.calculate_weight(measurement_signal, self.map)
+            max_weight = max(max_weight, particle.weight)
+
+        self.particle_set.resample(max_weight)
         
     # Output to terminal the mean state.
     def print_state_estimate(self):
