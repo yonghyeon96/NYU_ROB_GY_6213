@@ -5,6 +5,7 @@ import math
 from matplotlib import pyplot as plt
 from matplotlib.patches import Ellipse
 import matplotlib
+matplotlib.use('Agg')
 from nicegui import ui, app, run
 import numpy as np
 import time
@@ -32,7 +33,10 @@ def convert(frame: np.ndarray) -> bytes:
     
 # Create the connection with a real camera.
 def connect_with_camera():
-    video_capture = cv2.VideoCapture(1)
+    video_capture = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    video_capture.set(cv2.CAP_PROP_FPS, 30)
     return video_capture
     
 def update_video(video_image):
@@ -67,18 +71,21 @@ def main():
     
     # Set up the video stream, not needed for lab 1
     if stream_video:
-        video_capture = cv2.VideoCapture(parameters.camera_id)
-    
+        video_capture = cv2.VideoCapture(parameters.camera_id, cv2.CAP_DSHOW)
+        video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        video_capture.set(cv2.CAP_PROP_FPS, 30)
+        video_capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     # Enable frame grabs from the video stream.
     @app.get('/video/frame')
     async def grab_video_frame() -> Response:
         if not video_capture.isOpened():
-            return placeholder
+            return #placeholder
         # The `video_capture.read` call is a blocking function.
         # So we run it in a separate thread (default executor) to avoid blocking the event loop.
         _, frame = await run.io_bound(video_capture.read)
         if frame is None:
-            return placeholder
+            return #placeholder
         # `convert` is a CPU-intensive function, so we run it in a separate process to avoid blocking the event loop and GIL.
         jpeg = await run.cpu_bound(convert, frame)
         return Response(content=jpeg, media_type='image/jpeg')
