@@ -17,7 +17,7 @@ def variance_rotational_velocity_w(distance):
 
 
 def rotational_velocity_w(steering_angle_command):
-    k = 1.4357e-02
+    k = -1.4357e-02
     return k * steering_angle_command
 
 

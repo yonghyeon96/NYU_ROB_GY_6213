@@ -35,12 +35,17 @@ I3 = np.array([[1, 0, 0],[0, 1, 0], [0, 0, 1]])
 covariance_plot_scale = 100
 
 # PF parameters, modify the map and num particles as you see fit.
-num_particles = 100
-distance_variance = 0.10  # m^2, lidar likelihood variance
+num_particles = 200
+# Lidar likelihood variance sigma^2 in m^2 (not sigma).
+distance_variance_m2 = 0.10
+# Backward-compatible alias used by existing code.
+distance_variance = distance_variance_m2
+lidar_max_range_m = 12.0
 encoder_counts_to_distance = 3.05e-4  # m / encoder_count
-steering_to_w = 1.4357e-2  # rad/s per steering command unit
+steering_to_w = -1.4357e-2  # rad/s per steering command unit
 distance_variance_gain = 1.79e-4  # motion model variance gain for traveled distance
 rotational_velocity_variance = 3.35e-3  # (rad/s)^2
+"""
 wall_corner_list = [
     [0, 0, 2.74, 0], 
     [0, 0, 0, 3.78], 
@@ -51,3 +56,12 @@ wall_corner_list = [
     [1.92, 3.32, 2.74, 3.32],
     [2.74, 3.32, 2.74, 0]
     ]
+"""
+wall_corner_list = [
+    [0.00, 0.00, 2.69, 0.00],  # A -> B (bottom)
+    [2.69, 0.00, 2.69, 0.73],  # B -> C (right up)
+    [2.69, 0.73, 2.07, 0.73],  # C -> D (step left)
+    [2.07, 0.73, 2.07, 1.09],  # D -> E (step up)
+    [2.07, 1.09, 0.00, 1.09],  # E -> F (top)
+    [0.00, 1.09, 0.00, 0.00],  # F -> A (left down)
+]

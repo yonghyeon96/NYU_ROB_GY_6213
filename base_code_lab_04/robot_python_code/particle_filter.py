@@ -179,11 +179,14 @@ class Particle:
             if measured_distance <= 0:
                 continue
 
+            measured_distance = min(measured_distance, parameters.lidar_max_range_m)
             beam_angle = self.state.theta + lidar_signal.convert_hardware_angle(lidar_signal.angles[i])
             beam_state = State(self.state.x, self.state.y, angle_wrap(beam_angle))
             expected_distance = map.closest_distance_to_walls(beam_state)
-            if expected_distance > 1e6:
-                continue
+            # If the ray does not intersect the map, treat it as a max-range return
+            # instead of dropping that measurement.
+            if not math.isfinite(expected_distance) or expected_distance > parameters.lidar_max_range_m:
+                expected_distance = parameters.lidar_max_range_m
 
             prob = max(min_prob, self.gaussian(expected_distance, measured_distance))
             log_weight_sum += math.log(prob)
@@ -197,7 +200,10 @@ class Particle:
         
     # Return the normal distribution function output.
     def gaussian(self, expected_distance, distance):
-        return math.exp(-math.pow(expected_distance - distance, 2)/ 2 / parameters.distance_variance)
+        variance_m2 = parameters.distance_variance_m2
+        if variance_m2 <= 0:
+            variance_m2 = 1e-6
+        return math.exp(-math.pow(expected_distance - distance, 2) / (2 * variance_m2))
 
     # Deep copy the particle
     def deepcopy(self):
@@ -407,11 +413,12 @@ def offline_pf():
     map = Map(parameters.wall_corner_list)
 
     # Get data to filter
-    filename = './data/robot_data_0_0_25_02_26_21_41_33.pkl'
+    filename = './data/new_kidnapped.pkl'
     pf_data = data_handling.get_file_data_for_pf(filename)
 
     # Instantiate PF with no initial guess
-    particle_filter = ParticleFilter(parameters.num_particles, map, initial_state = State(0.5, 2.0, 1.57), state_stdev = State(0.1,0.1,0.1), known_start_state=True, encoder_counts_0=pf_data[0][2].encoder_counts)
+    particle_filter = ParticleFilter(parameters.num_particles, map, initial_state = State(0.68, 0.53, 0.0), state_stdev = State(0.1,0.1,0.1), known_start_state=True, encoder_counts_0=pf_data[0][2].encoder_counts)
+    start_estimate = particle_filter.state_estimate.deepcopy()
 
     # Create plotting tool for particles
     particle_filter_plot = ParticleFilterPlot(map)
@@ -428,6 +435,19 @@ def offline_pf():
         particle_filter_plot.update(particle_filter.particle_set.mean_state, particle_filter.particle_set, z_t, False)
 
     particle_filter_plot.update(particle_filter.particle_set.mean_state, particle_filter.particle_set, z_t, False)
+
+    # Debug summary for localization drift/translation checks.
+    end_estimate = particle_filter.state_estimate.deepcopy()
+    dx = end_estimate.x - start_estimate.x
+    dy = end_estimate.y - start_estimate.y
+    total_distance = math.sqrt(dx * dx + dy * dy)
+    dtheta = angle_wrap(end_estimate.theta - start_estimate.theta)
+    print("PF Debug Summary")
+    print(" start_estimate:", round(start_estimate.x, 4), round(start_estimate.y, 4), round(start_estimate.theta, 4))
+    print(" end_estimate:  ", round(end_estimate.x, 4), round(end_estimate.y, 4), round(end_estimate.theta, 4))
+    print(" delta_xy (m):  ", round(dx, 4), round(dy, 4))
+    print(" distance (m):  ", round(total_distance, 4))
+    print(" delta_theta(rad):", round(dtheta, 4))
 
         
 
