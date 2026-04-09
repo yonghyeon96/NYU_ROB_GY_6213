@@ -2,6 +2,8 @@
 
 This repository contains the lab work for the NYU course `ROB-GY 6213`, organized as a progression from basic robot communication and data logging to state estimation with an Extended Kalman Filter (EKF) and a Particle Filter (PF).
 
+![Robot platform](base_code_lab_04/robot_python_code/a_robot_image.jpg)
+
 Each lab keeps both:
 
 - `robot_arduino_code/`: firmware for the robot side
