@@ -2,23 +2,23 @@
 import math
 import random
 
+import parameters
+
 
 def variance_distance_travelled_s(distance):
-    alpha = 1.79e-4
-    return alpha * distance
+    return parameters.distance_variance_gain * distance
 
 
 def distance_travelled_s(encoder_counts):
-    return 3.05e-4 * encoder_counts
+    return parameters.encoder_counts_to_distance * encoder_counts
 
 
 def variance_rotational_velocity_w(distance):
-    return 3.35e-3
+    return parameters.rotational_velocity_variance
 
 
 def rotational_velocity_w(steering_angle_command):
-    k = -1.4357e-02
-    return k * steering_angle_command
+    return parameters.steering_to_w * steering_angle_command
 
 
 class MyMotionModel:
