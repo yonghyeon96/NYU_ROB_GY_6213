@@ -45,29 +45,21 @@ encoder_counts_to_distance = 3.05e-4  # m / encoder_count
 steering_to_w = -1.4357e-2  # rad/s per steering command unit
 distance_variance_gain = 1.79e-4  # motion model variance gain for traveled distance
 rotational_velocity_variance = 3.35e-3  # (rad/s)^2
-"""
+# Map coordinates from map.jpeg.
+# Units are metres. Origin is the lower-left corner in the photo:
+# +x points right, +y points up.
 wall_corner_list = [
-    [0, 0, 2.74, 0], 
-    [0, 0, 0, 3.78], 
-    [0, 3.78, 1.92, 3.78],
-    [1.03, 1.61, 1.03, 2.19],
-    [1.03, 2.19, 1.41, 2.19],
-    [1.92, 3.78, 1.92, 3.32],
-    [1.92, 3.32, 2.74, 3.32],
-    [2.74, 3.32, 2.74, 0]
-    ]
-"""
-wall_corner_list = [
-    [0.00, 0.00, 2.69, 0.00],  # A -> B (bottom)
-    [2.69, 0.00, 2.69, 0.73],  # B -> C (right up)
-    [2.69, 0.73, 2.07, 0.73],  # C -> D (step left)
-    [2.07, 0.73, 2.07, 1.09],  # D -> E (step up)
-    [2.07, 1.09, 0.00, 1.09],  # E -> F (top)
-    [0.00, 1.09, 0.00, 0.00],  # F -> A (left down)
+    [0.00, 0.00, 2.09, 0.00],  # A -> B: bottom-left wall, 209 cm
+    [2.09, 0.00, 2.09, 0.61],  # B -> C: inner vertical step, 61 cm
+    [2.09, 0.61, 3.04, 0.61],  # C -> D: lower-right wall, 95 cm
+    [3.04, 0.61, 3.04, 2.01],  # D -> E: right wall, 140 cm
+    [3.04, 2.01, 0.00, 2.01],  # E -> F: top wall, 304 cm
+    [0.00, 2.01, 0.00, 0.00],  # F -> A: left wall, 201 cm
 ]
 
-# Initial pose — edit this before each trial to match actual robot start position
-initial_pose = [0.68, 0.53, 0.0]   # [x_m, y_m, theta_rad]
+# Initial pose of the LiDAR centre. Edit before each trial if the physical
+# start marker is moved or if the LiDAR centre is not exactly on the marker.
+initial_pose = [0.30, 1.00, 0.0]   # [x_m, y_m, theta_rad]
 
 # --- WP-ICP parameters ---
 

@@ -18,13 +18,12 @@ import sys
 import os
 import math
 import random
-import time as _time
+import csv
 
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 
 import parameters
 import data_handling
@@ -33,7 +32,6 @@ import map_builder
 import feature_extraction
 import icp
 import wp_icp
-from icp import _angle_wrap
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +46,95 @@ def _draw_map_walls(ax):
 
 def _pos_error(pose_a, pose_b):
     return math.sqrt((pose_a[0] - pose_b[0])**2 + (pose_a[1] - pose_b[1])**2)
+
+
+def _valid_values(values):
+    return [float(v) for v in values if math.isfinite(float(v))]
+
+
+def _positive_values(values):
+    return [float(v) for v in values if math.isfinite(float(v)) and float(v) > 0.0]
+
+
+def _mean_or_nan(values):
+    values = _valid_values(values)
+    return float(np.mean(values)) if values else float('nan')
+
+
+def _std_or_nan(values):
+    values = _valid_values(values)
+    return float(np.std(values)) if values else float('nan')
+
+
+def _percentile_or_nan(values, percentile):
+    values = _valid_values(values)
+    return float(np.percentile(values, percentile)) if values else float('nan')
+
+
+def _fmt(value, decimals=3):
+    return f"{value:.{decimals}f}" if math.isfinite(float(value)) else "N/A"
+
+
+def _fmt_pose(pose):
+    return f"[{pose[0]:.3f}, {pose[1]:.3f}, {pose[2]:.3f}]"
+
+
+def _save_fig(fig, out_dir, filename):
+    path = os.path.join(out_dir, filename)
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    return path
+
+
+def _write_summary_csv(path, rows):
+    with open(path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['metric', 'dead_reckoning', 'standard_icp', 'wp_icp'])
+        for row in rows:
+            writer.writerow(row)
+
+
+def _write_summary_md(path, rows):
+    with open(path, 'w') as f:
+        f.write('| Metric | Dead Reckoning | Standard ICP | WP-ICP |\n')
+        f.write('|--------|----------------|--------------|--------|\n')
+        for metric, dr_value, icp_value, wp_value in rows:
+            f.write(f'| {metric} | {dr_value} | {icp_value} | {wp_value} |\n')
+
+
+def _write_timeseries_csv(path, ts, dr_icp_disc, icp_wp_disc,
+                          icp_iters, wp_c_iters, wp_l_iters,
+                          icp_runtime_ms, wp_runtime_ms,
+                          wp_gamma_c, wp_gamma_l):
+    with open(path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            'time_s',
+            'dr_to_icp_discrepancy_m',
+            'icp_to_wp_icp_discrepancy_m',
+            'standard_icp_iterations',
+            'wp_icp_corner_iterations',
+            'wp_icp_line_iterations',
+            'wp_icp_total_iterations',
+            'standard_icp_runtime_ms',
+            'wp_icp_runtime_ms',
+            'wp_icp_gamma_c',
+            'wp_icp_gamma_l',
+        ])
+        for k in range(1, len(ts)):
+            writer.writerow([
+                f'{ts[k]:.6f}',
+                f'{dr_icp_disc[k]:.6f}',
+                f'{icp_wp_disc[k]:.6f}',
+                icp_iters[k - 1],
+                wp_c_iters[k - 1],
+                wp_l_iters[k - 1],
+                wp_c_iters[k - 1] + wp_l_iters[k - 1],
+                f'{icp_runtime_ms[k - 1]:.6f}',
+                f'{wp_runtime_ms[k - 1]:.6f}',
+                f'{wp_gamma_c[k - 1]:.6f}',
+                f'{wp_gamma_l[k - 1]:.6f}',
+            ])
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +177,7 @@ def run(filename, initial_pose):
 
     icp_iters,  wp_c_iters,  wp_l_iters  = [], [], []
     icp_runtime, wp_runtime               = [], []
-    icp_errors, wp_errors                 = [], []
+    icp_errors                            = []
     wp_gamma_c,  wp_gamma_l               = [], []
     icp_converge, wp_converge             = 0, 0
     dropped_icp,  dropped_wp             = 0, 0
@@ -162,27 +249,38 @@ def run(filename, initial_pose):
             wp_gamma_l.append(res_wp.line_confidence)
 
     n = len(rows)
-    print(f"{'Method':<18} {'Converged':>10} {'Dropped':>8}")
-    print(f"{'Vanilla ICP':<18} {icp_converge:>10}/{n-1}  {dropped_icp:>6}")
-    print(f"{'WP-ICP':<18} {wp_converge:>10}/{n-1}  {dropped_wp:>6}")
+    trial_steps = n - 1
+    print(f"{'Method':<32} {'Converged':>10} {'Dropped':>8}")
+    print(f"{'Standard ICP (Vanilla ICP)':<32} {icp_converge:>10}/{trial_steps}  {dropped_icp:>6}")
+    print(f"{'WP-ICP':<32} {wp_converge:>10}/{trial_steps}  {dropped_wp:>6}")
 
     icp_arr = np.array(icp_traj)
     wp_arr  = np.array(wp_traj)
     dr_arr  = np.array(dr_traj)
+    ts = [rows[k][0] - rows[0][0] for k in range(len(rows))]
 
     # discrepancy vs ICP as proxy reference
     icp_wp_disc = [_pos_error(icp_arr[k], wp_arr[k]) for k in range(len(icp_arr))]
     dr_icp_disc = [_pos_error(dr_arr[k],  icp_arr[k]) for k in range(len(icp_arr))]
+    wp_total_iters = np.array(wp_c_iters) + np.array(wp_l_iters)
+    icp_runtime_ms = np.array(icp_runtime) * 1000.0
+    wp_runtime_ms = np.array(wp_runtime) * 1000.0
+
+    out_dir  = 'plots'
+    os.makedirs(out_dir, exist_ok=True)
+    base = os.path.splitext(os.path.basename(filename))[0]
+    report_dir = os.path.join(out_dir, base)
+    os.makedirs(report_dir, exist_ok=True)
 
     # ---- plots ----
     fig = plt.figure(figsize=(18, 12))
-    fig.suptitle(f'Offline Analysis — {os.path.basename(filename)}', fontsize=13, y=0.98)
+    fig.suptitle(f'Offline Analysis - {os.path.basename(filename)}', fontsize=13, y=0.98)
 
     # --- 1. Trajectory ---
     ax1 = fig.add_subplot(2, 3, 1)
     _draw_map_walls(ax1)
     ax1.plot(dr_arr[:,0],  dr_arr[:,1],  'g--', lw=1.2, alpha=0.8, label='Dead Reckoning')
-    ax1.plot(icp_arr[:,0], icp_arr[:,1], 'b-',  lw=1.5, label='Vanilla ICP')
+    ax1.plot(icp_arr[:,0], icp_arr[:,1], 'b-',  lw=1.5, label='Standard ICP')
     ax1.plot(wp_arr[:,0],  wp_arr[:,1],  'r-',  lw=1.5, label='WP-ICP')
     ax1.plot(*initial_pose[:2], 'ko', ms=8, label='start')
     ax1.set_aspect('equal'); ax1.legend(fontsize=7); ax1.set_title('Trajectory')
@@ -190,7 +288,6 @@ def run(filename, initial_pose):
 
     # --- 2. Position discrepancy ---
     ax2 = fig.add_subplot(2, 3, 2)
-    ts = [rows[k][0] - rows[0][0] for k in range(len(rows))]
     ax2.plot(ts, dr_icp_disc, 'g--', lw=1.2, alpha=0.8, label='|DR - ICP|')
     ax2.plot(ts, icp_wp_disc, 'r-',  lw=1.2, label='|ICP - WP-ICP|')
     ax2.set_xlabel('time (s)'); ax2.set_ylabel('position diff (m)')
@@ -199,17 +296,17 @@ def run(filename, initial_pose):
     # --- 3. ICP iterations ---
     ax3 = fig.add_subplot(2, 3, 3)
     bins = range(0, parameters.icp_max_iterations + 2)
-    ax3.hist(icp_iters,  bins=bins, alpha=0.6, color='blue',   label=f'Vanilla ICP (μ={np.mean(icp_iters):.1f})')
-    ax3.hist(np.array(wp_c_iters) + np.array(wp_l_iters),
-             bins=bins, alpha=0.6, color='red',
-             label=f'WP-ICP total (μ={np.mean(np.array(wp_c_iters)+np.array(wp_l_iters)):.1f})')
+    ax3.hist(icp_iters, bins=bins, alpha=0.6, color='blue',
+             label=f'Standard ICP (mean={np.mean(icp_iters):.1f})')
+    ax3.hist(wp_total_iters, bins=bins, alpha=0.6, color='red',
+             label=f'WP-ICP total (mean={np.mean(wp_total_iters):.1f})')
     ax3.set_xlabel('iterations'); ax3.set_ylabel('count')
     ax3.set_title('ICP Iteration Histogram'); ax3.legend(fontsize=7); ax3.grid(True, alpha=0.3)
 
     # --- 4. Runtime ---
     ax4 = fig.add_subplot(2, 3, 4)
-    ax4.plot(ts[1:], np.array(icp_runtime)*1000,  'b-',  lw=1.0, label='Vanilla ICP')
-    ax4.plot(ts[1:], np.array(wp_runtime)*1000,   'r-',  lw=1.0, label='WP-ICP')
+    ax4.plot(ts[1:], icp_runtime_ms, 'b-', lw=1.0, label='Standard ICP')
+    ax4.plot(ts[1:], wp_runtime_ms,  'r-', lw=1.0, label='WP-ICP')
     ax4.set_xlabel('time (s)'); ax4.set_ylabel('runtime (ms)')
     ax4.set_title('Runtime per Scan'); ax4.legend(fontsize=7); ax4.grid(True, alpha=0.3)
 
@@ -230,39 +327,151 @@ def run(filename, initial_pose):
 
     plt.tight_layout()
 
-    out_dir  = 'plots'
-    os.makedirs(out_dir, exist_ok=True)
-    base     = os.path.splitext(os.path.basename(filename))[0]
     out_path = os.path.join(out_dir, f'offline_{base}.png')
     fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    print(f"\nPlot saved: {out_path}")
+    overview_path = os.path.join(report_dir, 'offline_overview.png')
+    fig.savefig(overview_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"\nOverview plot saved: {out_path}")
+    print(f"Report overview saved: {overview_path}")
+
+    # ---- report-ready individual figures ----
+    fig_traj, ax = plt.subplots(figsize=(7, 6))
+    _draw_map_walls(ax)
+    ax.plot(dr_arr[:,0], dr_arr[:,1], 'g--', lw=1.3, alpha=0.8, label='Dead Reckoning')
+    ax.plot(icp_arr[:,0], icp_arr[:,1], 'b-', lw=1.6, label='Standard ICP')
+    ax.plot(wp_arr[:,0], wp_arr[:,1], 'r-', lw=1.6, label='WP-ICP')
+    ax.plot(*initial_pose[:2], 'ko', ms=7, label='start')
+    ax.set_aspect('equal'); ax.set_title('Trajectory Comparison')
+    ax.set_xlabel('x (m)'); ax.set_ylabel('y (m)'); ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    traj_path = _save_fig(fig_traj, report_dir, 'trajectory_comparison.png')
+
+    fig_disc, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(ts, dr_icp_disc, 'g--', lw=1.2, alpha=0.8, label='|Dead Reckoning - Standard ICP|')
+    ax.plot(ts, icp_wp_disc, 'r-', lw=1.2, label='|Standard ICP - WP-ICP|')
+    ax.set_title('Position Discrepancy')
+    ax.set_xlabel('time (s)'); ax.set_ylabel('discrepancy (m)')
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    disc_path = _save_fig(fig_disc, report_dir, 'position_discrepancy.png')
+
+    fig_iter, ax = plt.subplots(figsize=(8, 4))
+    ax.hist(icp_iters, bins=bins, alpha=0.6, color='blue',
+            label=f'Standard ICP (mean={_mean_or_nan(icp_iters):.1f})')
+    ax.hist(wp_total_iters, bins=bins, alpha=0.6, color='red',
+            label=f'WP-ICP total (mean={_mean_or_nan(wp_total_iters):.1f})')
+    ax.set_title('Iteration Histogram')
+    ax.set_xlabel('iterations'); ax.set_ylabel('count')
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    iter_path = _save_fig(fig_iter, report_dir, 'iteration_histogram.png')
+
+    fig_runtime, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(ts[1:], icp_runtime_ms, 'b-', lw=1.0, label='Standard ICP')
+    ax.plot(ts[1:], wp_runtime_ms, 'r-', lw=1.0, label='WP-ICP')
+    ax.set_title('Runtime Per Scan')
+    ax.set_xlabel('time (s)'); ax.set_ylabel('runtime (ms)')
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    runtime_path = _save_fig(fig_runtime, report_dir, 'runtime_per_scan.png')
+
+    fig_conf, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(ts[1:], wp_gamma_c, 'orange', lw=1.2, label='corner confidence')
+    ax.plot(ts[1:], wp_gamma_l, 'steelblue', lw=1.2, label='line confidence')
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_title('WP-ICP Confidence')
+    ax.set_xlabel('time (s)'); ax.set_ylabel('confidence')
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    conf_path = _save_fig(fig_conf, report_dir, 'wp_icp_confidence.png')
+
+    fig_feat_iter, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(ts[1:], wp_c_iters, 'orange', lw=1.0, label='corner iterations')
+    ax.plot(ts[1:], wp_l_iters, 'steelblue', lw=1.0, label='line iterations')
+    ax.set_title('WP-ICP Corner vs Line Iterations')
+    ax.set_xlabel('time (s)'); ax.set_ylabel('iterations')
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    feat_iter_path = _save_fig(fig_feat_iter, report_dir, 'wp_icp_corner_line_iterations.png')
+
+    print("Report figures saved:")
+    for path in [traj_path, disc_path, iter_path, runtime_path, conf_path, feat_iter_path]:
+        print(f"  {path}")
 
     # ---- summary table ----
+    valid_icp_iters = _positive_values(icp_iters)
+    valid_wp_total_iters = _positive_values(wp_total_iters)
+    valid_wpc = _positive_values(wp_c_iters)
+    valid_wpl = _positive_values(wp_l_iters)
+    valid_icp_runtime_ms = _positive_values(icp_runtime_ms)
+    valid_wp_runtime_ms = _positive_values(wp_runtime_ms)
+    valid_icp_err = _valid_values(icp_errors)
+    icp_conv_rate = 100.0 * icp_converge / max(trial_steps, 1)
+    wp_conv_rate = 100.0 * wp_converge / max(trial_steps, 1)
+    mean_dr_icp_disc = _mean_or_nan(dr_icp_disc)
+    mean_icp_wp_disc = _mean_or_nan(icp_wp_disc)
+    final_dr_icp_disc = dr_icp_disc[-1]
+    final_icp_wp_disc = icp_wp_disc[-1]
+    min_total_conf = min((c + l for c, l in zip(wp_gamma_c, wp_gamma_l)), default=float('nan'))
+
+    summary_rows = [
+        ['Convergence rate', 'N/A', f'{icp_conv_rate:.1f} %', f'{wp_conv_rate:.1f} %'],
+        ['Dropped scans', 'N/A', str(dropped_icp), str(dropped_wp)],
+        ['Mean iterations', 'N/A', _fmt(_mean_or_nan(valid_icp_iters), 2), _fmt(_mean_or_nan(valid_wp_total_iters), 2)],
+        ['Mean corner iterations', 'N/A', 'N/A', _fmt(_mean_or_nan(valid_wpc), 2)],
+        ['Mean line iterations', 'N/A', 'N/A', _fmt(_mean_or_nan(valid_wpl), 2)],
+        ['Mean runtime (ms/scan)', 'N/A', _fmt(_mean_or_nan(valid_icp_runtime_ms), 2), _fmt(_mean_or_nan(valid_wp_runtime_ms), 2)],
+        ['Runtime std. dev. (ms)', 'N/A', _fmt(_std_or_nan(valid_icp_runtime_ms), 2), _fmt(_std_or_nan(valid_wp_runtime_ms), 2)],
+        ['95th percentile runtime (ms)', 'N/A', _fmt(_percentile_or_nan(valid_icp_runtime_ms, 95), 2), _fmt(_percentile_or_nan(valid_wp_runtime_ms, 95), 2)],
+        ['Mean discrepancy to Standard ICP (m)', _fmt(mean_dr_icp_disc, 4), '0.0000', _fmt(mean_icp_wp_disc, 4)],
+        ['Final discrepancy to Standard ICP (m)', _fmt(final_dr_icp_disc, 4), '0.0000', _fmt(final_icp_wp_disc, 4)],
+        ['Average confidence', 'N/A', 'N/A', f'corner={_fmt(_mean_or_nan(wp_gamma_c), 3)}, line={_fmt(_mean_or_nan(wp_gamma_l), 3)}'],
+        ['Minimum total confidence', 'N/A', 'N/A', _fmt(min_total_conf, 3)],
+        ['Mean ICP match error (m)', 'N/A', _fmt(_mean_or_nan(valid_icp_err), 4), 'N/A'],
+        ['Final pose [x, y, theta]', _fmt_pose(dr_arr[-1]), _fmt_pose(icp_arr[-1]), _fmt_pose(wp_arr[-1])],
+    ]
+
+    summary_csv_path = os.path.join(report_dir, 'summary_table.csv')
+    summary_md_path = os.path.join(report_dir, 'summary_table.md')
+    timeseries_csv_path = os.path.join(report_dir, 'timeseries_metrics.csv')
+    _write_summary_csv(summary_csv_path, summary_rows)
+    _write_summary_md(summary_md_path, summary_rows)
+    _write_timeseries_csv(
+        timeseries_csv_path, ts, dr_icp_disc, icp_wp_disc,
+        icp_iters, wp_c_iters, wp_l_iters,
+        icp_runtime_ms, wp_runtime_ms, wp_gamma_c, wp_gamma_l,
+    )
+
     print(f"\n{'='*60}")
     print(f"  Summary")
     print(f"{'='*60}")
     print(f"  Timesteps          : {n}")
-    valid_icp  = [v for v in icp_iters  if v > 0]
-    valid_wpc  = [v for v in wp_c_iters if v > 0]
-    valid_wpl  = [v for v in wp_l_iters if v > 0]
-    valid_err  = [v for v in icp_errors if math.isfinite(v)]
-    print(f"  ICP mean iters     : {np.mean(valid_icp):.1f}"  if valid_icp  else "  ICP mean iters     : N/A")
-    print(f"  WP corner iters    : {np.mean(valid_wpc):.1f}"  if valid_wpc  else "  WP corner iters    : N/A")
-    print(f"  WP line iters      : {np.mean(valid_wpl):.1f}"  if valid_wpl  else "  WP line iters      : N/A")
-    print(f"  ICP mean error (m) : {np.mean(valid_err):.4f}" if valid_err  else "  ICP mean error     : N/A")
-    print(f"  ICP  runtime (ms)  : {np.mean(icp_runtime)*1000:.2f} ± {np.std(icp_runtime)*1000:.2f}")
-    print(f"  WP   runtime (ms)  : {np.mean(wp_runtime)*1000:.2f} ± {np.std(wp_runtime)*1000:.2f}")
-    print(f"  Avg Γ_C            : {np.mean(wp_gamma_c):.3f}")
-    print(f"  Avg Γ_L            : {np.mean(wp_gamma_l):.3f}")
-    print(f"  Final DR  pose     : [{dr_arr[-1,0]:.3f}, {dr_arr[-1,1]:.3f}, {dr_arr[-1,2]:.3f}]")
-    print(f"  Final ICP pose     : [{icp_arr[-1,0]:.3f}, {icp_arr[-1,1]:.3f}, {icp_arr[-1,2]:.3f}]")
-    print(f"  Final WP  pose     : [{wp_arr[-1,0]:.3f}, {wp_arr[-1,1]:.3f}, {wp_arr[-1,2]:.3f}]")
+    print(f"  Standard ICP convergence : {icp_conv_rate:.1f}% ({icp_converge}/{trial_steps})")
+    print(f"  WP-ICP convergence       : {wp_conv_rate:.1f}% ({wp_converge}/{trial_steps})")
+    print(f"  Standard ICP mean iters  : {_fmt(_mean_or_nan(valid_icp_iters), 2)}")
+    print(f"  WP-ICP total iters       : {_fmt(_mean_or_nan(valid_wp_total_iters), 2)}")
+    print(f"  WP corner iters          : {_fmt(_mean_or_nan(valid_wpc), 2)}")
+    print(f"  WP line iters            : {_fmt(_mean_or_nan(valid_wpl), 2)}")
+    print(f"  Standard ICP runtime     : {_fmt(_mean_or_nan(valid_icp_runtime_ms), 2)} +/- {_fmt(_std_or_nan(valid_icp_runtime_ms), 2)} ms")
+    print(f"  WP-ICP runtime           : {_fmt(_mean_or_nan(valid_wp_runtime_ms), 2)} +/- {_fmt(_std_or_nan(valid_wp_runtime_ms), 2)} ms")
+    print(f"  Standard ICP 95% runtime : {_fmt(_percentile_or_nan(valid_icp_runtime_ms, 95), 2)} ms")
+    print(f"  WP-ICP 95% runtime       : {_fmt(_percentile_or_nan(valid_wp_runtime_ms, 95), 2)} ms")
+    print(f"  Mean |DR - ICP|          : {_fmt(mean_dr_icp_disc, 4)} m")
+    print(f"  Mean |ICP - WP-ICP|      : {_fmt(mean_icp_wp_disc, 4)} m")
+    print(f"  Final |DR - ICP|         : {_fmt(final_dr_icp_disc, 4)} m")
+    print(f"  Final |ICP - WP-ICP|     : {_fmt(final_icp_wp_disc, 4)} m")
+    print(f"  Avg Gamma_C              : {_fmt(_mean_or_nan(wp_gamma_c), 3)}")
+    print(f"  Avg Gamma_L              : {_fmt(_mean_or_nan(wp_gamma_l), 3)}")
+    print(f"  Min Gamma_C + Gamma_L    : {_fmt(min_total_conf, 3)}")
+    print(f"  Final DR  pose           : {_fmt_pose(dr_arr[-1])}")
+    print(f"  Final ICP pose           : {_fmt_pose(icp_arr[-1])}")
+    print(f"  Final WP  pose           : {_fmt_pose(wp_arr[-1])}")
+    print(f"\nSummary CSV saved: {summary_csv_path}")
+    print(f"Summary Markdown saved: {summary_md_path}")
+    print(f"Timeseries CSV saved: {timeseries_csv_path}")
 
     return {
         'dr_traj': dr_traj, 'icp_traj': icp_traj, 'wp_traj': wp_traj,
         'icp_iters': icp_iters, 'wp_c_iters': wp_c_iters, 'wp_l_iters': wp_l_iters,
         'icp_runtime': icp_runtime, 'wp_runtime': wp_runtime,
         'wp_gamma_c': wp_gamma_c, 'wp_gamma_l': wp_gamma_l,
+        'dr_icp_disc': dr_icp_disc, 'icp_wp_disc': icp_wp_disc,
+        'summary_rows': summary_rows,
     }
 
 
